@@ -4,7 +4,6 @@ import RealityCheck from "./RealityCheck";
 import BalanceChart from "./BalanceChart";
 import BalanceTrendChart from "./BalanceTrendChart";
 
-
 export default function PlayerTab({
   balance,
   bet,
@@ -13,17 +12,18 @@ export default function PlayerTab({
   spinCount,
   lastWin,
   history,
-  isSpinning, // 1. Tangkap props isSpinning
+  isSpinning,
   totalLoss,
   symbols,
   handleSpin,
   handleAutoSpin,
   handleReset,
   handleManualBalanceChange,
+  controls, // BARU: panel SPIN / SKIP / AUTO / SIMULASI dari App.jsx
 }) {
   return (
-    <div className="grid md:grid-cols-3 gap-6">
-      {/* Mesin Slot & Control */}
+    <div className="grid gap-6 md:grid-cols-2">
+      {/* Kotak spin: selebar penuh */}
       <div className="md:col-span-2 bg-slate-800 border border-slate-700 rounded-2xl p-6 flex flex-col items-center shadow-2xl">
         <div className="w-full flex justify-between items-center mb-6">
           <div>
@@ -31,9 +31,9 @@ export default function PlayerTab({
               Saldo Pemain
             </p>
             <div className="flex items-center gap-4">
-              <button 
+              <button
                 className="w-10 h-10 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-xl shadow flex items-center justify-center transition-all cursor-pointer active:scale-95"
-                 onClick={() => handleManualBalanceChange(-100000)}
+                onClick={() => handleManualBalanceChange(-100000)}
               >
                 -
               </button>
@@ -44,7 +44,7 @@ export default function PlayerTab({
               >
                 Rp {balance.toLocaleString("id-ID")}
               </p>
-              <button 
+              <button
                 className="w-10 h-10 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-xl shadow flex items-center justify-center transition-all cursor-pointer active:scale-95"
                 onClick={() => handleManualBalanceChange(100000)}
               >
@@ -61,7 +61,6 @@ export default function PlayerTab({
           </div>
         </div>
 
-        {/* 2. Teruskan isSpinning ke SlotMachine */}
         <SlotMachine
           reels={reels}
           lastWin={lastWin}
@@ -71,7 +70,9 @@ export default function PlayerTab({
           symbols={symbols}
         />
 
-        {/* 3. Teruskan isSpinning ke BetControls */}
+        {/* Panel baru tepat di bawah papan */}
+        <div className="mt-4 flex w-full justify-center">{controls}</div>
+
         <BetControls
           balance={balance}
           bet={bet}
@@ -83,7 +84,11 @@ export default function PlayerTab({
         />
       </div>
 
-      <RealityCheck totalLoss={totalLoss} />
+      {/* Reality check: tepat di bawah kotak spin */}
+      <div className="md:col-span-2">
+        <RealityCheck totalLoss={totalLoss} />
+      </div>
+
       <BalanceChart history={history} />
       <BalanceTrendChart history={history} />
     </div>

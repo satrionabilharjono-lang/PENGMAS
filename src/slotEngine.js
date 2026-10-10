@@ -13,6 +13,7 @@ import {
   WIN_STYLE,
   TIMING,
 } from "./slotConfig";
+import { WIN_TIERS, EXTRA_TIMING } from "./slotExtras";
 
 const COLS = GRID.cols;
 const ROWS = GRID.rows;
@@ -23,6 +24,7 @@ const IDS = SYMBOLS.map((s) => s.id);
 // ---------- Waktu animasi (dipakai juga oleh SlotMachine.jsx) ----------
 export const timings = {
   ...TIMING,
+  ...EXTRA_TIMING,
   dropInMs:
     TIMING.fallMs + (COLS - 1) * TIMING.colStaggerMs + (ROWS - 1) * TIMING.rowStaggerMs + 100,
   refillMs: TIMING.fallMs + (ROWS - 1) * TIMING.rowStaggerMs + 100,
@@ -283,11 +285,22 @@ function genWin(recipe) {
 }
 
 // ---------- Paket hasil untuk App.jsx dan SlotMachine.jsx ----------
+/** Tingkat perayaan untuk kemenangan (kelipatan taruhan), atau null kalau kecil. */
+export function getWinTier(payout) {
+  let found = null;
+  for (const t of WIN_TIERS) if (payout >= t.min) found = t;
+  return found;
+}
+
 function durationOf(res) {
   const t = timings;
   let ms = t.dropOutMs + t.dropInMs + t.endPauseMs;
   ms += res.steps.length * (t.highlightMs + t.popMs + t.refillMs);
-  if (res.payout > 0 && res.orbs.length) ms += res.orbs.length * t.orbEachMs + t.orbSettleMs;
+  if (res.payout > 0 && res.orbs.length) {
+    ms += res.orbs.length * t.orbEachMs + t.slamMs + t.orbSettleMs;
+  }
+  const tier = getWinTier(res.payout);
+  if (tier) ms += tier.durationMs;
   return ms;
 }
 
