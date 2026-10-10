@@ -1,8 +1,8 @@
-import React from "react";
 import { AlertTriangle } from "lucide-react";
 
-export default function RealityCheck({ balance }) {
-  const lostAmount = Math.max(0, 1000000 - balance);
+// Terima props totalLoss dari App -> PlayerTab -> RealityCheck
+export default function RealityCheck({ totalLoss }) {
+  const lostAmount = Math.max(0, totalLoss);
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 flex flex-col justify-between">
@@ -11,7 +11,7 @@ export default function RealityCheck({ balance }) {
           <AlertTriangle className="w-5 h-5 text-amber-500" /> Reality Check Kerugian
         </h3>
         <p className="text-xs text-slate-400 mb-4">
-          Berapa banyak barang berguna yang hilang akibat kekalahan virtual ini:
+          Berapa banyak barang berguna yang hilang akibat kekalahan murni dari judi:
         </p>
 
         <div className="space-y-3">

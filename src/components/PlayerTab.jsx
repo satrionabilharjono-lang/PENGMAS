@@ -1,8 +1,8 @@
-import React from "react";
 import SlotMachine from "./SlotMachine";
 import BetControls from "./BetControls";
 import RealityCheck from "./RealityCheck";
 import BalanceChart from "./BalanceChart";
+import BalanceTrendChart from "./BalanceTrendChart";
 
 
 export default function PlayerTab({
@@ -14,11 +14,12 @@ export default function PlayerTab({
   lastWin,
   history,
   isSpinning, // 1. Tangkap props isSpinning
+  totalLoss,
   symbols,
   handleSpin,
   handleAutoSpin,
   handleReset,
-  setBalance,
+  handleManualBalanceChange,
 }) {
   return (
     <div className="grid md:grid-cols-3 gap-6">
@@ -32,7 +33,7 @@ export default function PlayerTab({
             <div className="flex items-center gap-4">
               <button 
                 className="w-10 h-10 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-xl shadow flex items-center justify-center transition-all cursor-pointer active:scale-95"
-                 onClick={() => setBalance((prev) => Math.max(10000, prev - 100000))}
+                 onClick={() => handleManualBalanceChange(-100000)}
               >
                 -
               </button>
@@ -45,7 +46,7 @@ export default function PlayerTab({
               </p>
               <button 
                 className="w-10 h-10 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-xl shadow flex items-center justify-center transition-all cursor-pointer active:scale-95"
-                onClick={() => setBalance((prev) => Math.max(10000, prev + 100000))}
+                onClick={() => handleManualBalanceChange(100000)}
               >
                 +
               </button>
@@ -82,8 +83,9 @@ export default function PlayerTab({
         />
       </div>
 
-      <RealityCheck balance={balance} />
+      <RealityCheck totalLoss={totalLoss} />
       <BalanceChart history={history} />
+      <BalanceTrendChart history={history} />
     </div>
   );
 }

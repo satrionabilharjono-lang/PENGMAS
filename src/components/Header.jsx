@@ -1,4 +1,3 @@
-import React from "react";
 import { ShieldAlert, DollarSign, Cpu } from "lucide-react";
 
 export default function Header({ activeTab, setActiveTab }) {

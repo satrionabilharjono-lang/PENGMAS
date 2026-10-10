@@ -1,9 +1,12 @@
-import React, { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Header from "./components/Header";
 import PlayerTab from "./components/PlayerTab";
 import BandarTab from "./components/BandarTab";
-
-export const SYMBOLS = ["🍋", "🔔", "💎", "7️⃣", "🍒", "BAR"];
+import BannerAds from "./components/BannerAds";
+// BARU: simbol & pengaturan papan dipindah ke slotConfig.js
+import { SYMBOLS, TIMING } from "./slotConfig";
+// BARU: engine yang menyusun papan sesuai keputusan bandar
+import { buildSpinResult, toQuickResult, createIdleResult } from "./slotEngine";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("player");
@@ -11,16 +14,47 @@ export default function App() {
   // Player State
   const [balance, setBalance] = useState(1000000);
   const [bet, setBet] = useState(20000);
-  const [reels, setReels] = useState(["7️⃣", "7️⃣", "7️⃣"]);
-  const [history, setHistory] = useState([{ spin: 0, balance: 1000000 }]);
+  // `reels` sekarang berisi HASIL PAPAN dari slotEngine (bukan 3 simbol lagi)
+  const [reels, setReels] = useState(() => createIdleResult());
+  const [history, setHistory] = useState([
+    {
+      spin: 0,
+      balance: 1000000,
+      totalLoss: 0,
+      chartLoss: 0,
+      eventType: "initial",
+    },
+  ]);
   const [lastWin, setLastWin] = useState(0);
   const [spinCount, setSpinCount] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false); // State Animasi Putaran
-
+  const [totalLoss, setTotalLoss] = useState(0);
+  const [chartLoss, setChartLoss] = useState(0);
   // Bandar Control State
   const [rtp, setRtp] = useState(30);
   const [baitMode, setBaitMode] = useState(true);
   const [forceLoss, setForceLoss] = useState(false);
+
+  const balanceRef = useRef(balance);
+  const totalLossRef = useRef(totalLoss);
+  const chartLossRef = useRef(chartLoss);
+  const spinCountRef = useRef(spinCount);
+
+  useEffect(() => {
+    balanceRef.current = balance;
+  }, [balance]);
+
+  useEffect(() => {
+    totalLossRef.current = totalLoss;
+  }, [totalLoss]);
+
+  useEffect(() => {
+    chartLossRef.current = chartLoss;
+  }, [chartLoss]);
+
+  useEffect(() => {
+    spinCountRef.current = spinCount;
+  }, [spinCount]);
 
   // Helper untuk memutar file audio dari folder public/sounds/
   const playAudio = (fileName) => {
@@ -32,92 +66,152 @@ export default function App() {
     });
   };
 
+  const handleManualBalanceChange = (amount) => {
+    const currentBalance = balanceRef.current;
+    const currentChartLoss = chartLossRef.current;
+    const currentTotalLoss = totalLossRef.current;
+    const updatedBalance = Math.max(10000, currentBalance + amount);
+    const actualChange = updatedBalance - currentBalance;
+    const updatedChartLoss = Math.max(0, currentChartLoss - actualChange);
+
+    setBalance(updatedBalance);
+    setChartLoss(updatedChartLoss);
+    setHistory((prev) => [
+      ...prev,
+      {
+        spin: spinCountRef.current,
+        balance: updatedBalance,
+        totalLoss: currentTotalLoss,
+        chartLoss: updatedChartLoss,
+        eventType:
+          actualChange > 0
+            ? "manual-add"
+            : actualChange < 0
+              ? "manual-subtract"
+              : "manual-no-change",
+      },
+    ]);
+  };
+
   // Spin Logic
   const handleSpin = () => {
-    // Cegah klik beruntun saat mesin sedang berputar atau saldo kurang
-    if (balance < bet || isSpinning) {
-      if (balance < bet) {
+    const currentBalance = balanceRef.current;
+    const currentTotalLoss = totalLossRef.current;
+    const currentChartLoss = chartLossRef.current;
+    const currentSpinCount = spinCountRef.current;
+
+    if (currentBalance < bet || isSpinning) {
+      if (currentBalance < bet) {
         playAudio("loss.mp3");
         alert("Saldo habis! Inilah yang terjadi kalau terus bermain judol.");
       }
       return;
     }
 
-    // 1. Mulai Animasi Putaran
     playAudio("spin.mp3");
+
+    const nextSpinCount = currentSpinCount + 1;
+
+    // --- KEPUTUSAN BANDAR (logika sama persis seperti sebelumnya) ---
+    let wantWin = false;
+    let targetMultiplier = 1.5;
+
+    // --- FITUR UMPAN TENGAH (INTERMITTENT BAIT) ---
+    // Pancingan acak setiap kelipatan 6 atau 9 spin (50% peluang dipancing) saat spin > 4
+    const isMiddleBait =
+      baitMode &&
+      nextSpinCount > 4 &&
+      (nextSpinCount % 6 === 0 || nextSpinCount % 9 === 0) &&
+      Math.random() < 0.5;
+
+    // 1. Umpan Awal (Spin 1-4) OR Umpan Tengah (Spin Berkala)
+    if ((baitMode && nextSpinCount <= 4) || isMiddleBait) {
+      wantWin = true;
+      // Umpan awal ngasih ~2x, umpan tengah ngasih ~1.3x (kemenangan tipis semu)
+      targetMultiplier = nextSpinCount <= 4 ? 2 : 1.3;
+
+      // 2. Murni Sesuai RTP Bandar
+    } else if (!forceLoss) {
+      if (Math.random() * 100 < rtp) {
+        wantWin = true;
+        targetMultiplier = 1.5;
+      }
+    }
+
+    // --- BARU: engine menyusun papan yang hasilnya cocok dengan keputusan di atas ---
+    const result = buildSpinResult({ win: wantWin, target: targetMultiplier });
+    const winAmount = Math.round(result.payout * bet); // pembayaran nyata dari papan
+    const isWin = winAmount > 0;
+
+    // Mulai animasi: papan jatuh, tumble, bola pengali (semua di SlotMachine.jsx)
+    setReels(result);
     setIsSpinning(true);
 
-    // 2. Gunakan setTimeout untuk memberi jeda animasi (600ms)
+    // Hasil dicatat setelah animasi selesai (durasi mengikuti isi papan)
     setTimeout(() => {
-      let currentBalance = balance - bet;
-      const nextSpinCount = spinCount + 1;
-      setSpinCount(nextSpinCount);
+      let updatedBalance = currentBalance - bet;
+      let nextTotalLoss = currentTotalLoss;
+      let nextChartLoss = currentChartLoss;
 
-      let isWin = false;
-      let winAmount = 0;
-
-      // Logika Penentuan Menang / Kalah
-      if (baitMode && nextSpinCount <= 4) {
-        isWin = true;
-        winAmount = bet * 2;
-      } else if (!forceLoss) {
-        if (Math.random() * 100 < rtp) {
-          isWin = true;
-          winAmount = bet * 1.5;
-        }
-      }
-
-      let newReels;
       if (isWin) {
-        const sym = SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
-        newReels = [sym, sym, sym];
-        currentBalance += winAmount;
+        updatedBalance += winAmount;
+        nextChartLoss = Math.max(0, nextChartLoss + bet - winAmount);
         playAudio("win.mp3");
         setLastWin(winAmount);
       } else {
-        const sym1 = SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
-        const sym2 = SYMBOLS[(SYMBOLS.indexOf(sym1) + 1) % SYMBOLS.length];
-        newReels = [sym1, sym1, sym2];
+        nextTotalLoss += bet;
+        nextChartLoss += bet;
+        setTotalLoss(nextTotalLoss);
         playAudio("loss.mp3");
         setLastWin(0);
       }
 
       // Update State Hasil
-      setReels(newReels);
-      setBalance(currentBalance);
+      setBalance(updatedBalance);
+      setSpinCount(nextSpinCount);
+      setChartLoss(nextChartLoss);
       setHistory((prev) => [
         ...prev,
-        { spin: nextSpinCount, balance: currentBalance },
+        {
+          spin: nextSpinCount,
+          balance: updatedBalance,
+          totalLoss: nextTotalLoss,
+          chartLoss: nextChartLoss,
+          eventType: isWin ? "spin-win" : "spin-loss",
+        },
       ]);
 
-      // 3. Matikan Animasi Putaran setelah hasil dikunci
-
       setIsSpinning(false);
-    }, 2800);
+    }, result.durationMs + 60);
   };
 
-  // Terima parameter count (default 100x spin)
   // Terima parameter count (default 50x spin)
-const handleAutoSpin = (count = 50) => {
-  if (isSpinning) return;
+  const handleAutoSpin = (count = 50) => {
+    if (isSpinning) return;
 
-  if (balance < bet) {
-    playAudio("loss.mp3");
-    alert("Saldo habis! Tidak bisa melakukan Auto Spin.");
-    return;
-  }
+    const currentBalance = balanceRef.current;
+    const currentTotalLoss = totalLossRef.current;
+    const currentChartLoss = chartLossRef.current;
+    const currentSpinCount = spinCountRef.current;
 
-  setIsSpinning(true);
-  playAudio("spin.mp3");
+    if (currentBalance < bet) {
+      playAudio("loss.mp3");
+      alert("Saldo habis! Tidak bisa melakukan Auto Spin.");
+      return;
+    }
 
-  // Simpan saldo awal sebelum simulasi untuk komparasi audio di akhir
-  const initialBalance = balance;
+    playAudio("spin.mp3");
 
-  setTimeout(() => {
+    // Simpan saldo awal sebelum simulasi untuk komparasi audio di akhir
+    const initialBalance = currentBalance;
+
+    // Simulasi semua putaran langsung (hasilnya baru ditampilkan setelah animasi)
     let tempBalance = initialBalance;
-    let tempSpin = spinCount;
+    let tempSpin = currentSpinCount;
     let lastWinAmount = 0;
-    let finalReels = reels;
+    let tempTotalLoss = currentTotalLoss;
+    let tempChartLoss = currentChartLoss;
+    let lastResult = null;
     const addedHistory = [];
 
     for (let i = 0; i < count; i++) {
@@ -127,100 +221,135 @@ const handleAutoSpin = (count = 50) => {
       tempBalance -= bet;
       tempSpin += 1;
 
-      let isWin = false;
-      let winAmount = 0;
-
       // Logika Penentuan Menang / Kalah (Konsisten dengan handleSpin)
+      let wantWin = false;
+      let targetMultiplier = 1.5;
       if (baitMode && tempSpin <= 4) {
-        isWin = true;
-        winAmount = bet * 2;
+        wantWin = true;
+        targetMultiplier = 2;
       } else if (!forceLoss) {
         if (Math.random() * 100 < rtp) {
-          isWin = true;
-          winAmount = bet * 1.5;
+          wantWin = true;
         }
       }
 
+      const r = buildSpinResult({ win: wantWin, target: targetMultiplier });
+      const winAmount = Math.round(r.payout * bet);
+      const isWin = winAmount > 0;
+      lastResult = r;
+
       if (isWin) {
         tempBalance += winAmount;
+        tempChartLoss = Math.max(0, tempChartLoss + bet - winAmount);
         lastWinAmount = winAmount;
-        const sym = SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
-        finalReels = [sym, sym, sym];
       } else {
         lastWinAmount = 0;
-        const sym1 = SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
-        const sym2 = SYMBOLS[(SYMBOLS.indexOf(sym1) + 1) % SYMBOLS.length];
-        finalReels = [sym1, sym1, sym2];
+        tempTotalLoss += bet;
+        tempChartLoss += bet;
       }
 
       // Catat entri baru secara terpisah untuk digabung dengan functional update
       addedHistory.push({
         spin: tempSpin,
         balance: Math.round(tempBalance),
+        totalLoss: tempTotalLoss,
+        chartLoss: tempChartLoss,
+        eventType: isWin ? "spin-win" : "spin-loss",
       });
     }
 
-    const roundedFinalBalance = Math.round(tempBalance);
+    // Animasi singkat: papan berputar buram lalu menampilkan papan putaran terakhir
+    setReels(toQuickResult(lastResult));
+    setIsSpinning(true);
 
-    // Update State Sekaligus dengan Aman
-    setBalance(roundedFinalBalance);
-    setSpinCount(tempSpin);
-    setHistory((prevHistory) => [...prevHistory, ...addedHistory]);
-    setReels(finalReels);
-    setLastWin(lastWinAmount);
-    setIsSpinning(false);
+    setTimeout(() => {
+      const roundedFinalBalance = Math.round(tempBalance);
 
-    // Suara penutup hasil simulasi (Bandingkan saldo akhir vs saldo awal)
-    if (roundedFinalBalance < initialBalance) {
-      playAudio("loss.mp3");
-    } else {
-      playAudio("win.mp3");
-    }
-  }, 2800);
-};
+      // Update State Sekaligus dengan Aman
+      setBalance(roundedFinalBalance);
+      setSpinCount(tempSpin);
+      setTotalLoss(tempTotalLoss);
+      setChartLoss(tempChartLoss);
+      setHistory((prevHistory) => [...prevHistory, ...addedHistory]);
+      setLastWin(lastWinAmount);
+      setIsSpinning(false);
+
+      // Suara penutup hasil simulasi (Bandingkan saldo akhir vs saldo awal)
+      if (roundedFinalBalance < initialBalance) {
+        playAudio("loss.mp3");
+      } else {
+        playAudio("win.mp3");
+      }
+    }, TIMING.autoSpinMs);
+  };
 
   const handleReset = () => {
     setBalance(1000000);
     setBet(20000);
-    setReels(["7️⃣", "7️⃣", "7️⃣"]);
-    setHistory([{ spin: 0, balance: 1000000 }]);
+    setReels(createIdleResult());
+    setTotalLoss(0);
+    setChartLoss(0);
+    setHistory([
+      {
+        spin: 0,
+        balance: 1000000,
+        totalLoss: 0,
+        chartLoss: 0,
+        eventType: "initial",
+      },
+    ]);
     setLastWin(0);
     setSpinCount(0);
     setIsSpinning(false);
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white font-sans p-4 md:p-8">
+    <div className="min-h-screen bg-slate-900 text-white font-sans p-4 md:p-8 overflow-x-hidden">
       <Header activeTab={activeTab} setActiveTab={setActiveTab} />
 
-      <main className="max-w-5xl mx-auto mt-6">
-        {activeTab === "player" ? (
-          <PlayerTab
-            balance={balance}
-            bet={bet}
-            setBet={setBet}
-            reels={reels}
-            spinCount={spinCount}
-            lastWin={lastWin}
-            history={history}
-            isSpinning={isSpinning} // Kirim props isSpinning
-            setBalance={setBalance}
-            symbols={SYMBOLS}
-            handleSpin={handleSpin}
-            handleAutoSpin={handleAutoSpin}
-            handleReset={handleReset}
-          />
-        ) : (
-          <BandarTab
-            rtp={rtp}
-            setRtp={setRtp}
-            baitMode={baitMode}
-            setBaitMode={setBaitMode}
-            forceLoss={forceLoss}
-            setForceLoss={setForceLoss}
-          />
-        )}
-      </main>
+      {/* CONTAINER UTAMA (Relative Anchor) */}
+      <div className="relative max-w-5xl mx-auto mt-6">
+        {/* Banner Kiri (Mengikuti tinggi penuh main) */}
+        <div className="hidden xl:block absolute -left-64 top-0 w-56 h-full pb-2">
+          <BannerAds position="left" />
+        </div>
+
+        {/* Layar Utama (Ukurannya 100% Tetap & Tidak Terpengaruh Banner) */}
+        <main className="w-full">
+          {activeTab === "player" ? (
+            <PlayerTab
+              balance={balance}
+              bet={bet}
+              setBet={setBet}
+              reels={reels}
+              spinCount={spinCount}
+              lastWin={lastWin}
+              history={history}
+              isSpinning={isSpinning}
+              totalLoss={totalLoss}
+              handleManualBalanceChange={handleManualBalanceChange}
+              symbols={SYMBOLS.map((s) => s.img)}
+              handleSpin={handleSpin}
+              handleAutoSpin={handleAutoSpin}
+              handleReset={handleReset}
+            />
+          ) : (
+            <BandarTab
+              rtp={rtp}
+              setRtp={setRtp}
+              baitMode={baitMode}
+              setBaitMode={setBaitMode}
+              forceLoss={forceLoss}
+              setForceLoss={setForceLoss}
+            />
+          )}
+        </main>
+
+        {/* Banner Kanan (Mengikuti tinggi penuh main) */}
+        <div className="hidden xl:block absolute -right-64 top-0 w-56 h-full pb-2">
+          <BannerAds position="right" />
+        </div>
+      </div>
     </div>
   );
-}
+};

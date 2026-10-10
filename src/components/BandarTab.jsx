@@ -1,4 +1,3 @@
-import React from "react";
 import { Sliders, Award } from "lucide-react";
 
 export default function BandarTab({
@@ -18,7 +17,8 @@ export default function BandarTab({
             Panel Kendali Bandar (Dapur Algoritma)
           </h2>
           <p className="text-xs text-slate-400">
-            Ubah persentase kemenangan dan manipulasi logika pemain secara langsung
+            Ubah persentase kemenangan dan manipulasi logika pemain secara
+            langsung
           </p>
         </div>
       </div>
@@ -44,8 +44,9 @@ export default function BandarTab({
             <span>50% (Standard Bandar)</span>
           </div>
           <p className="text-xs text-slate-400 bg-slate-900 p-3 rounded-lg border border-slate-700">
-            💡 <strong>Fakta Bandar:</strong> Bandar tidak pernah mengeset RTP 100%.
-            RTP 30% artinya dari Rp 100rb uang pemain, Bandar menyedot Rp 70rb sebagai keuntungan bersih.
+            💡 <strong>Fakta Bandar:</strong> Bandar tidak pernah mengeset RTP
+            100%. RTP 30% artinya dari Rp 100rb uang pemain, Bandar menyedot Rp
+            70rb sebagai keuntungan bersih.
           </p>
         </div>
 
@@ -53,8 +54,12 @@ export default function BandarTab({
         <div className="space-y-4">
           <div className="flex items-center justify-between p-4 bg-slate-900 rounded-xl border border-slate-700">
             <div>
-              <p className="text-sm font-bold text-slate-200">Mode "Bait Win" (Umpan Awal)</p>
-              <p className="text-xs text-slate-400">Kasih menang 2-4x di awal biar pemain ketagihan</p>
+              <p className="text-sm font-bold text-slate-200">
+                Mode "Bait Win" (Umpan Awal)
+              </p>
+              <p className="text-xs text-slate-400">
+                Kasih menang 2-4x di awal biar pemain ketagihan
+              </p>
             </div>
             <input
               type="checkbox"
@@ -66,8 +71,12 @@ export default function BandarTab({
 
           <div className="flex items-center justify-between p-4 bg-slate-900 rounded-xl border border-slate-700">
             <div>
-              <p className="text-sm font-bold text-red-400">Force Loss (Kunci Kekalahan Total)</p>
-              <p className="text-xs text-slate-400">Matikan semua peluang menang pemain</p>
+              <p className="text-sm font-bold text-red-400">
+                Force Loss (Kunci Kekalahan Total)
+              </p>
+              <p className="text-xs text-slate-400">
+                Matikan semua peluang menang pemain
+              </p>
             </div>
             <input
               type="checkbox"
@@ -81,16 +90,25 @@ export default function BandarTab({
 
       <div className="mt-8 p-4 bg-red-950/30 border border-red-800/50 rounded-xl">
         <h4 className="text-sm font-bold text-red-400 mb-1 flex items-center gap-2">
-          <Award className="w-4 h-4" /> Apa yang Harus Diajarkan ke Orang Lain dari Panel Ini?
+          <Award className="w-4 h-4" /> Apa yang Harus Diajarkan ke Orang Lain
+          dari Panel Ini?
         </h4>
         <ul className="text-xs text-slate-300 space-y-1 list-disc list-inside">
           <li>
-            Judi online <strong>bukan permainan keberuntungan</strong>, melainkan sistem komputer yang hasilnya sudah diatur oleh pemilik server.
+            Judi online <strong>bukan permainan keberuntungan</strong>,
+            melainkan sistem komputer yang hasilnya sudah diatur oleh pemilik
+            server.
           </li>
           <li>
-            Pemain tidak pernah bertarung melawan "nasib", melainkan melawan algoritma matematis yang tugasnya menguras uang.
+            Pemain tidak pernah bertarung melawan "nasib", melainkan melawan
+            algoritma matematis yang tugasnya menguras uang.
           </li>
         </ul>
+      </div>
+      <div className="mt-8 p-10 md:p-16 bg-red-950/40 border-2 border-red-800/60 rounded-2xl text-center min-h-[200px] flex items-center justify-center shadow-2xl shadow-red-950/50">
+        <label className="text-3xl md:text-5xl font-black text-red-500 tracking-wider uppercase drop-shadow-md">
+          Jangan judol gaesss 🚫
+        </label>
       </div>
     </div>
   );

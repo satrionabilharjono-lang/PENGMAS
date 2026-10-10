@@ -1,4 +1,3 @@
-import React from "react";
 import { Play, TrendingDown, RotateCcw } from "lucide-react";
 
 export default function BetControls({
