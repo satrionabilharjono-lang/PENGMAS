@@ -60,6 +60,7 @@ export const SOUND = {
   multiplier: null,
   bigWin: null,
   jackpot: null,
+  scatter: null,   // suara scatter / free spin mulai
   spinFadeMs: 600,
   resultFadeMs: 300,
 };
@@ -68,4 +69,63 @@ export const SOUND = {
 // 5. WAKTU TAMBAHAN ANIMASI (ms)
 //    slamMs : lama tulisan "×N" besar saat pengali diterapkan
 // ---------------------------------------------------------------------
-export const EXTRA_TIMING = { slamMs: 1500 };
+export const EXTRA_TIMING = {
+  slamMs: 1500,
+  scatterIntroMs: 2800, // layar "FREE SPIN!" setelah scatter muncul
+  fsRetriggerMs: 1100,  // tulisan "+5 FREE SPIN" saat retrigger
+  fsEndMs: 2400,        // ringkasan di akhir ronde free spin
+};
+
+// ---------------------------------------------------------------------
+// 6. SCATTER (simbol emas bercahaya)
+//    img            : gambar scatter kamu (taruh di public/symbols/scatter.jpg)
+//    glow           : warna cahaya di belakang scatter
+//    decorChanceLoss: peluang papan KALAH menampilkan 2-3 scatter ("hampir dapat free spin")
+//    decorChanceWin : peluang papan MENANG menampilkan 1-2 scatter
+// ---------------------------------------------------------------------
+export const SCATTER = {
+  img: "/symbols/scatter.jpg",
+  glow: "#fbbf24",
+  decorChanceLoss: 0.3,
+  decorChanceWin: 0.1,
+};
+
+// ---------------------------------------------------------------------
+// 7. FREE SPIN (gaya Zeus)
+//    Pemicu: scatter >= triggerCount di papan akhir sebuah putaran.
+//    Selama free spin: tidak memotong saldo, dan SEMUA bola pengali yang muncul
+//    DITAMBAHKAN ke pengali total yang terus naik; setiap kemenangan dikali
+//    pengali total itu.
+//
+//    Keputusan bandar (diatur di tab Bandar / bandarLogic.js):
+//      chancePercent        : peluang tiap putaran memicu free spin (slider di tab Bandar)
+//
+//    triggerCount / triggerWeights : jumlah scatter saat dipicu dan bobot munculnya
+//    spins                : jumlah free spin awal
+//    retriggerCount       : scatter di dalam free spin untuk menambah putaran
+//    retriggerSpins       : tambahan putaran saat retrigger
+//    retriggerChancePercent : peluang tiap free spin memunculkan retrigger
+//    maxSpins             : batas total free spin dalam satu ronde
+//    winChancePercent     : peluang tiap free spin menang
+//    baseTargets          : kelipatan dasar kemenangan per free spin (sebelum dikali pengali)
+//    orbChancePercent     : peluang bola pengali muncul di sebuah free spin
+//    orbWeights           : nilai bola di free spin { nilai: bobot } (bobot besar = sering)
+//    doubleOrbChancePercent : peluang muncul 2 bola (bila sudah ada bola)
+//    maxWinX              : ronde berhenti kalau total menang free spin sudah mencapai ini (× taruhan)
+// ---------------------------------------------------------------------
+export const FREE_SPINS = {
+  triggerCount: 4,
+  triggerWeights: { 4: 70, 5: 22, 6: 8 },
+  spins: 15,
+  retriggerCount: 3,
+  retriggerSpins: 5,
+  retriggerChancePercent: 3,
+  maxSpins: 40,
+  chancePercent: 0.5,
+  winChancePercent: 30,
+  baseTargets: [0.5, 0.8, 1, 1.5],
+  orbChancePercent: 12,
+  orbWeights: { 2: 50, 3: 30, 5: 15, 10: 4, 25: 1 },
+  doubleOrbChancePercent: 25,
+  maxWinX: 300,
+};

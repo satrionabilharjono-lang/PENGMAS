@@ -15,6 +15,7 @@ import { GRID, SYMBOLS, MULTIPLIERS } from "../slotConfig";
 import { timings as T, getWinTier } from "../slotEngine";
 import Sound from "../sound";
 import { onSkip } from "../slotSkip";
+import { SCATTER, FREE_SPINS } from "../slotExtras";
 
 const { cols: COLS, rows: ROWS } = GRID;
 const SYMBOL_BY_ID = Object.fromEntries(SYMBOLS.map((s) => [s.id, s]));
@@ -59,7 +60,67 @@ function OrbFace({ value }) {
   );
 }
 
-function Cell({ cell, hit, zap, stagger }) {
+// Scatter: gambar emas dengan cahaya (shadow light) dan sinar berputar di belakangnya.
+function ScatterFace({ boost }) {
+  const reduce = useReducedMotion();
+  const [broken, setBroken] = useState(false);
+  return (
+    <div data-testid="scatter" className="relative flex h-full w-full items-center justify-center">
+      {/* sinar emas berputar */}
+      {!reduce && (
+        <motion.div
+          className="pointer-events-none absolute"
+          style={{
+            width: "190%",
+            height: "190%",
+            background:
+              "repeating-conic-gradient(from 0deg, rgba(253,224,71,.55) 0deg 7deg, transparent 7deg 28deg)",
+            WebkitMaskImage: "radial-gradient(circle, #000 0%, transparent 60%)",
+            maskImage: "radial-gradient(circle, #000 0%, transparent 60%)",
+          }}
+          animate={{ rotate: 360 }}
+          transition={{ repeat: Infinity, duration: boost ? 3.5 : 9, ease: "linear" }}
+        />
+      )}
+      {/* cahaya emas berdenyut di belakang */}
+      <motion.div
+        className="pointer-events-none absolute rounded-full"
+        style={{
+          width: "165%",
+          height: "165%",
+          background: `radial-gradient(circle, ${SCATTER.glow}f2 0%, ${SCATTER.glow}8c 34%, ${SCATTER.glow}33 52%, transparent 70%)`,
+        }}
+        animate={
+          reduce
+            ? {}
+            : boost
+              ? { scale: [1, 1.4, 1], opacity: [1, 0.85, 1] }
+              : { scale: [0.88, 1.08, 0.88], opacity: [0.7, 1, 0.7] }
+        }
+        transition={{ repeat: Infinity, duration: boost ? 0.7 : 2.2, ease: "easeInOut" }}
+      />
+      {broken ? (
+        <div className="relative grid h-[80%] w-[80%] place-items-center rounded-full border-2 border-amber-100 bg-gradient-to-br from-yellow-200 via-amber-400 to-orange-600 text-2xl font-black text-amber-950 shadow-[0_0_18px_rgba(251,191,36,.9)]">
+          ✦
+        </div>
+      ) : (
+        <img
+          src={SCATTER.img}
+          alt=""
+          draggable={false}
+          onError={() => setBroken(true)}
+          className="pointer-events-none relative h-[94%] w-[94%] select-none rounded-lg object-contain"
+          style={{
+            filter:
+              "drop-shadow(0 0 7px rgba(253,224,71,1)) drop-shadow(0 0 16px rgba(251,191,36,.85))",
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function Cell({ cell, hit, zap, boost, stagger }) {
   const delay =
     stagger === "initial"
       ? (cell.col * T.colStaggerMs + cell.row * T.rowStaggerMs) / 1000
@@ -67,11 +128,11 @@ function Cell({ cell, hit, zap, stagger }) {
   return (
     <motion.div
       className="absolute left-0 top-0 flex w-full items-center justify-center"
-      style={{ height: `${100 / ROWS}%`, zIndex: zap ? 20 : 1 }}
+      style={{ height: `${100 / ROWS}%`, zIndex: zap ? 20 : cell.kind === "scatter" ? 3 : 1 }}
       initial={{ y: `${(cell.row - ROWS - 1) * 100}%`, scale: 1, opacity: 1 }}
       animate={{
         y: `${cell.row * 100}%`,
-        scale: zap ? [1, 1.7, 1.3] : hit ? [1, 1.14, 1] : 1,
+        scale: zap ? [1, 1.7, 1.3] : hit ? [1, 1.14, 1] : boost ? [1, 1.28, 1] : 1,
         opacity: 1,
       }}
       exit={{
@@ -85,7 +146,9 @@ function Cell({ cell, hit, zap, stagger }) {
           ? { duration: 0.55, ease: "easeOut" }
           : hit
             ? { duration: 0.5, repeat: Infinity }
-            : { duration: 0.2 },
+            : boost
+              ? { duration: 0.7, repeat: Infinity }
+              : { duration: 0.2 },
         opacity: { duration: 0.01 },
       }}
     >
@@ -98,7 +161,9 @@ function Cell({ cell, hit, zap, stagger }) {
               : ""
         }`}
       >
-        {cell.kind === "orb" ? (
+        {cell.kind === "scatter" ? (
+          <ScatterFace boost={boost} />
+        ) : cell.kind === "orb" ? (
           <OrbFace value={cell.value} />
         ) : (
           <img
@@ -293,6 +358,12 @@ export default function SlotMachine({ reels, isSpinning }) {
   const [slam, setSlam] = useState(null);
   const [dim, setDim] = useState(false);
   const [celebration, setCelebration] = useState(null);
+  const [fsHud, setFsHud] = useState(null); // { index, total, winX } selama free spin
+  const [intro, setIntro] = useState(null); // layar "FREE SPIN!"
+  const [retrig, setRetrig] = useState(null); // "+5 FREE SPIN"
+  const [fsEnd, setFsEnd] = useState(null); // ringkasan akhir ronde
+  const [scBoost, setScBoost] = useState(false); // scatter menyala lebih terang
+  const reduce = useReducedMotion();
   const runRef = useRef(0);
   const counter = useRef(0);
   const celebrateResolve = useRef(null);
@@ -328,13 +399,21 @@ export default function SlotMachine({ reels, isSpinning }) {
   async function runFull(plan, my) {
     const alive = () => runRef.current === my;
     if (plan.instant) {
-      // Turbo: lewati semua animasi, langsung papan akhir.
+      // Turbo / lewati: tanpa animasi, langsung papan akhir.
       showFinal();
       return;
     }
+    const fs = plan.fs;
     setHit(new Set());
     setZap(new Set());
-    setMult(1);
+    setScBoost(false);
+    setIntro(null);
+    setRetrig(null);
+    setFsEnd(null);
+    setMult(fs ? fs.multBefore : 1);
+    setFsHud(
+      fs ? { index: fs.index, total: fs.total - (fs.retrigger || 0), winX: fs.winBefore } : null,
+    );
     setPopup(null);
     setBolt(null);
     setSlam(null);
@@ -362,10 +441,12 @@ export default function SlotMachine({ reels, isSpinning }) {
     if (!alive()) return;
 
     // ---- bola pengali: petir menyambar satu per satu, lalu angka besar menghantam layar ----
-    if (plan.payout > 0 && plan.orbs.length) {
+    // (di free spin bola selalu menambah pengali total, walau putaran itu tidak menang)
+    const orbPhase = fs ? plan.orbs.length > 0 : plan.payout > 0 && plan.orbs.length > 0;
+    if (orbPhase) {
       const finalCells = flatten(plan.final);
       setDim(true);
-      let acc = 0;
+      let acc = fs ? fs.multBefore : 0;
       for (const o of plan.orbs) {
         if (!alive()) return;
         const where = finalCells.find((c) => c.uid === o.uid);
@@ -380,27 +461,77 @@ export default function SlotMachine({ reels, isSpinning }) {
       }
       if (!alive()) return;
       setBolt(null);
-      setSlam({ key: `${plan.id}-slam`, value: plan.multiplier, base: plan.tumbleTotal, total: plan.payout });
-      setFlashKey((k) => k + 1);
-      Sound.multiplier();
-      doShake(true);
-      await sleep(T.slamMs);
-      if (!alive()) return;
-      setSlam(null);
+      if (plan.payout > 0) {
+        setSlam({ key: `${plan.id}-slam`, value: plan.multiplier, base: plan.tumbleTotal, total: plan.payout });
+        setFlashKey((k) => k + 1);
+        Sound.multiplier();
+        doShake(true);
+        await sleep(T.slamMs);
+        if (!alive()) return;
+        setSlam(null);
+      }
       setDim(false);
       await sleep(T.orbSettleMs);
     }
+    if (fs) setFsHud((h) => h && { ...h, winX: fs.winBefore + plan.payout });
 
-    // ---- menang besar / jackpot ----
-    const tier = getWinTier(plan.payout);
-    if (tier) {
+    // ---- menang besar / jackpot (free spin merayakan TOTAL ronde di akhir, bukan tiap putaran) ----
+    if (!fs) {
+      const tier = getWinTier(plan.payout);
+      if (tier) {
+        if (!alive()) return;
+        Sound.celebrate(tier);
+        doShake(true);
+        const t0 = performance.now();
+        await celebrate(tier, plan.payout, plan.bet);
+        const rest = tier.durationMs - (performance.now() - t0);
+        if (rest > 0) await sleep(rest); // tetap selaras dengan durasi yang dihitung engine
+      }
+    }
+
+    // ---- scatter cukup: layar FREE SPIN ----
+    if (plan.trigger) {
       if (!alive()) return;
-      Sound.celebrate(tier);
+      setScBoost(true);
+      Sound.scatter();
       doShake(true);
-      const t0 = performance.now();
-      await celebrate(tier, plan.payout, plan.bet);
-      const rest = tier.durationMs - (performance.now() - t0);
-      if (rest > 0) await sleep(rest); // tetap selaras dengan durasi yang dihitung engine
+      setIntro({ key: `${plan.id}-intro`, count: plan.scatters });
+      await sleep(T.scatterIntroMs);
+      if (!alive()) return;
+      setIntro(null);
+      setScBoost(false);
+    }
+
+    // ---- retrigger di dalam free spin ----
+    if (fs && fs.retrigger) {
+      if (!alive()) return;
+      setScBoost(true);
+      Sound.retrigger();
+      setRetrig({ key: `${plan.id}-retrig`, n: fs.retrigger });
+      setFsHud((h) => h && { ...h, total: fs.total });
+      await sleep(T.fsRetriggerMs);
+      if (!alive()) return;
+      setRetrig(null);
+      setScBoost(false);
+    }
+
+    // ---- akhir ronde free spin ----
+    if (fs && fs.last) {
+      if (!alive()) return;
+      setFsEnd({ key: `${plan.id}-end`, total: fs.roundTotal, mult: fs.multAfter, spins: fs.index, bet: plan.bet });
+      await sleep(T.fsEndMs);
+      if (!alive()) return;
+      setFsEnd(null);
+      const tier = getWinTier(fs.grandTotal);
+      if (tier) {
+        Sound.celebrate(tier);
+        doShake(true);
+        const t0 = performance.now();
+        await celebrate(tier, fs.grandTotal, plan.bet);
+        const rest = tier.durationMs - (performance.now() - t0);
+        if (rest > 0) await sleep(rest);
+      }
+      setFsHud(null);
     }
     await sleep(T.endPauseMs);
   }
@@ -415,9 +546,14 @@ export default function SlotMachine({ reels, isSpinning }) {
     setSlam(null);
     setDim(false);
     setDropping(false);
+    setIntro(null);
+    setRetrig(null);
+    setFsEnd(null);
+    setFsHud(null);
+    setScBoost(false);
     closeCelebration();
     setCells(flatten(r.final));
-    setMult(r.multiplier || 1);
+    setMult(r.fs ? r.fs.multAfter : r.multiplier || 1);
   }, [closeCelebration]);
 
   useEffect(() => {
@@ -451,24 +587,44 @@ export default function SlotMachine({ reels, isSpinning }) {
     <>
       <motion.div
         animate={shake}
-        className="my-3 w-full max-w-5xl rounded-2xl border-4 border-amber-500/30 bg-slate-950 p-3 shadow-inner sm:p-6"
+        className={`my-3 w-full max-w-5xl rounded-2xl border-4 bg-slate-950 p-3 shadow-inner transition-colors sm:p-6 ${
+          fsHud
+            ? "border-amber-300/80 shadow-[0_0_34px_rgba(251,191,36,.45)]"
+            : "border-amber-500/30"
+        }`}
       >
         <div className="mb-3 flex items-center justify-between gap-3">
-          <p className="text-[11px] uppercase tracking-widest text-slate-400">
-            Menang di mana saja · {GRID.cols}×{GRID.rows}
-          </p>
+          {fsHud ? (
+            <div data-testid="fs-hud" className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="rounded-full border border-amber-200 bg-gradient-to-b from-amber-300 to-amber-500 px-3 py-1 text-xs font-black tracking-wider text-amber-950 shadow-[0_0_14px_rgba(251,191,36,.8)] sm:text-sm">
+                FREE SPIN {fsHud.index}/{fsHud.total}
+              </span>
+              <motion.span
+                key={fsHud.winX}
+                initial={{ scale: 1.25 }}
+                animate={{ scale: 1 }}
+                className="truncate text-xs font-bold tabular-nums text-amber-200 sm:text-sm"
+              >
+                TOTAL {rupiah(fsHud.winX * (reels.bet || 0))}
+              </motion.span>
+            </div>
+          ) : (
+            <p className="text-[11px] uppercase tracking-widest text-slate-400">
+              Menang di mana saja · {GRID.cols}×{GRID.rows}
+            </p>
+          )}
           <motion.div
             key={mult}
             initial={{ scale: 1.5 }}
             animate={{ scale: 1 }}
             transition={{ type: "spring", stiffness: 300, damping: 14 }}
             className={`rounded-full border px-3 py-1 text-sm font-bold tabular-nums ${
-              mult > 1
+              mult > 1 || (fsHud && mult > 0)
                 ? "border-cyan-200 bg-cyan-300/25 text-cyan-100 shadow-[0_0_16px_rgba(103,232,249,.8)]"
                 : "border-cyan-300/50 bg-cyan-300/10 text-cyan-200"
             }`}
           >
-            PENGALI ×{mult}
+            {fsHud && mult <= 0 ? "PENGALI —" : `PENGALI ×${mult}`}
           </motion.div>
         </div>
 
@@ -492,7 +648,11 @@ export default function SlotMachine({ reels, isSpinning }) {
             <motion.div
               key={`${boardKey}-${c}`}
               className="absolute top-0 h-full"
-              style={{ left: `${(c * 100) / COLS}%`, width: `${100 / COLS}%` }}
+              style={{
+                left: `${(c * 100) / COLS}%`,
+                width: `${100 / COLS}%`,
+                zIndex: cells.some((x) => x.col === c && x.kind === "scatter") ? 3 : 1,
+              }}
               initial={{ y: "0%" }}
               animate={{ y: dropping ? "108%" : "0%" }}
               transition={{
@@ -510,6 +670,7 @@ export default function SlotMachine({ reels, isSpinning }) {
                       cell={cell}
                       hit={hit.has(cell.uid)}
                       zap={zap.has(cell.uid)}
+                      boost={scBoost && cell.kind === "scatter"}
                       stagger={stagger}
                     />
                   ))}
@@ -599,6 +760,157 @@ export default function SlotMachine({ reels, isSpinning }) {
                 <span className="rounded-xl bg-slate-950/80 px-5 py-2 text-3xl font-extrabold text-amber-300 shadow-lg sm:text-5xl">
                   {popup.text}
                 </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* lapisan emas lembut selama free spin */}
+          {fsHud && (
+            <div
+              className="pointer-events-none absolute inset-0 z-[2]"
+              style={{
+                background:
+                  "radial-gradient(circle at 50% 0%, rgba(251,191,36,.22), transparent 60%), radial-gradient(circle at 50% 100%, rgba(251,191,36,.16), transparent 55%)",
+              }}
+            />
+          )}
+
+          {/* layar FREE SPIN setelah scatter muncul */}
+          <AnimatePresence>
+            {intro && (
+              <motion.div
+                key={intro.key}
+                data-testid="fs-intro"
+                className="pointer-events-none absolute inset-0 z-40 grid place-items-center overflow-hidden"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className="absolute inset-0 bg-slate-950/75" />
+                {!reduce && (
+                  <motion.div
+                    className="absolute h-[260%] w-[260%]"
+                    style={{
+                      background:
+                        "repeating-conic-gradient(from 0deg, rgba(253,224,71,.32) 0deg 8deg, transparent 8deg 24deg)",
+                      WebkitMaskImage: "radial-gradient(circle, #000 0%, transparent 38%)",
+                      maskImage: "radial-gradient(circle, #000 0%, transparent 38%)",
+                    }}
+                    animate={{ rotate: 360 }}
+                    transition={{ repeat: Infinity, duration: 12, ease: "linear" }}
+                  />
+                )}
+                {!reduce && (
+                  <motion.div
+                    className="absolute inset-0 bg-amber-200"
+                    initial={{ opacity: 0.85 }}
+                    animate={{ opacity: 0 }}
+                    transition={{ duration: 0.8 }}
+                  />
+                )}
+                {!reduce &&
+                  [0, 0.45, 0.9].map((d) => (
+                    <motion.div
+                      key={d}
+                      className="absolute h-24 w-24 rounded-full border-4 border-amber-300"
+                      initial={{ scale: 0, opacity: 0.9 }}
+                      animate={{ scale: 11, opacity: 0 }}
+                      transition={{ duration: 1.6, delay: d, ease: "easeOut", repeat: 1 }}
+                    />
+                  ))}
+                <motion.div
+                  className="relative text-center"
+                  initial={{ scale: 0.2, rotate: -8, opacity: 0 }}
+                  animate={{ scale: [0.2, 1.2, 1], rotate: [-8, 3, 0], opacity: 1 }}
+                  transition={{ duration: 0.8, times: [0, 0.6, 1], ease: "easeOut" }}
+                >
+                  <div className="text-[10px] font-bold uppercase tracking-[0.45em] text-amber-200 sm:text-sm">
+                    {intro.count} scatter
+                  </div>
+                  <div
+                    className="text-5xl font-black leading-none tracking-wider sm:text-7xl md:text-8xl"
+                    style={{
+                      backgroundImage: "linear-gradient(180deg,#fef9c3 0%,#fbbf24 45%,#ea580c 100%)",
+                      WebkitBackgroundClip: "text",
+                      backgroundClip: "text",
+                      color: "transparent",
+                      filter: "drop-shadow(0 4px 0 #7c2d12) drop-shadow(0 0 28px rgba(251,191,36,.8))",
+                    }}
+                  >
+                    FREE SPIN
+                  </div>
+                  <div className="mt-2 text-xl font-extrabold text-white drop-shadow-[0_0_14px_rgba(251,191,36,.9)] sm:text-4xl">
+                    {FREE_SPINS.spins} putaran gratis
+                  </div>
+                  <div className="mt-1 text-[11px] font-semibold text-amber-200/90 sm:text-sm">
+                    Pengali terus bertambah sepanjang free spin
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* retrigger: putaran bertambah */}
+          <AnimatePresence>
+            {retrig && (
+              <motion.div
+                key={retrig.key}
+                data-testid="fs-retrigger"
+                className="pointer-events-none absolute inset-x-0 top-[18%] z-[35] grid place-items-center"
+                initial={{ opacity: 0, scale: 0.5 }}
+                animate={{ opacity: 1, scale: [0.5, 1.25, 1] }}
+                exit={{ opacity: 0, scale: 1.2 }}
+                transition={{ duration: 0.45 }}
+              >
+                <span
+                  className="rounded-2xl border-2 border-amber-200 bg-slate-950/85 px-6 py-2 text-3xl font-black text-amber-300 sm:text-5xl"
+                  style={{ boxShadow: "0 0 30px rgba(251,191,36,.8)" }}
+                >
+                  +{retrig.n} FREE SPIN
+                </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ringkasan akhir ronde free spin */}
+          <AnimatePresence>
+            {fsEnd && (
+              <motion.div
+                key={fsEnd.key}
+                data-testid="fs-end"
+                className="pointer-events-none absolute inset-0 z-40 grid place-items-center"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className="absolute inset-0 bg-slate-950/80" />
+                <motion.div
+                  className="relative text-center"
+                  initial={{ scale: 0.4, opacity: 0 }}
+                  animate={{ scale: [0.4, 1.1, 1], opacity: 1 }}
+                  transition={{ duration: 0.6, times: [0, 0.65, 1] }}
+                >
+                  <div className="text-[10px] font-bold uppercase tracking-[0.4em] text-amber-200 sm:text-sm">
+                    Free spin selesai · {fsEnd.spins} putaran
+                  </div>
+                  <div
+                    className="mt-1 text-4xl font-black tabular-nums sm:text-6xl"
+                    style={{
+                      backgroundImage: "linear-gradient(180deg,#fef9c3 0%,#fbbf24 55%,#ea580c 100%)",
+                      WebkitBackgroundClip: "text",
+                      backgroundClip: "text",
+                      color: "transparent",
+                      filter: "drop-shadow(0 3px 0 #7c2d12) drop-shadow(0 0 22px rgba(251,191,36,.8))",
+                    }}
+                  >
+                    {rupiah(fsEnd.total * (fsEnd.bet || 0))}
+                  </div>
+                  <div className="mt-1 text-base font-extrabold text-cyan-200 sm:text-2xl">
+                    pengali akhir ×{fmtX(fsEnd.mult)}
+                  </div>
+                </motion.div>
               </motion.div>
             )}
           </AnimatePresence>

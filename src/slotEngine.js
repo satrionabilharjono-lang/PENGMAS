@@ -13,7 +13,7 @@ import {
   WIN_STYLE,
   TIMING,
 } from "./slotConfig";
-import { WIN_TIERS, EXTRA_TIMING } from "./slotExtras";
+import { WIN_TIERS, EXTRA_TIMING, SCATTER, FREE_SPINS } from "./slotExtras";
 
 const COLS = GRID.cols;
 const ROWS = GRID.rows;
@@ -143,7 +143,7 @@ function makeRefill(stepPlans) {
 }
 
 // ---------- Papan KALAH ----------
-function genLoss() {
+function genLoss(opts = {}) {
   for (let attempt = 0; attempt < 80; attempt++) {
     const slots = shuffle([...Array(CELLS).keys()]);
     const cells = new Array(CELLS);
@@ -160,7 +160,7 @@ function genLoss() {
       for (let i = 0; i < CAP; i++) put(makeSym(id));
       counts[id] = CAP;
     }
-    if (Math.random() < LOSS_BOARD.orbChance) {
+    if (!opts.noOrbs && Math.random() < LOSS_BOARD.orbChance) {
       const n = 1 + rand(LOSS_BOARD.maxOrbs);
       for (let i = 0; i < n; i++) put(makeOrb(pickOrbValue()));
     }
@@ -292,20 +292,72 @@ export function getWinTier(payout) {
   return found;
 }
 
-function durationOf(res) {
+// ---------- Scatter & bola pengali sebagai sel khusus ----------
+const countKind = (board, kind) =>
+  board.reduce((a, col) => a + col.filter((c) => c.kind === kind).length, 0);
+
+/**
+ * Ubah beberapa simbol biasa di papan AKHIR menjadi scatter / bola pengali.
+ * Hanya sel yang tidak pernah ikut kemenangan yang dipilih, dan sel diubah di
+ * tempat (objek yang sama dipakai semua papan), jadi urutan tumble tetap konsisten.
+ */
+function convertCells(res, specs) {
+  if (!specs.length) return;
+  const pool = shuffle(
+    res.final.flatMap((col) => col.filter((c) => c.kind === "sym")),
+  );
+  if (pool.length < specs.length) throw new Error("Papan terlalu penuh untuk scatter/bola.");
+  specs.forEach((sp, i) => {
+    const cell = pool[i];
+    delete cell.id;
+    if (sp.kind === "orb") {
+      cell.kind = "orb";
+      cell.value = sp.value;
+    } else {
+      cell.kind = "scatter";
+    }
+  });
+}
+
+// Scatter pajangan: tidak pernah cukup untuk memicu free spin.
+function decorScatterCount(won) {
+  const maxDecor = Math.max(0, FREE_SPINS.triggerCount - 1);
+  if (won) {
+    return Math.random() < SCATTER.decorChanceWin ? Math.min(maxDecor, 1 + rand(2)) : 0;
+  }
+  const lo = Math.max(1, FREE_SPINS.triggerCount - 2);
+  return Math.random() < SCATTER.decorChanceLoss ? Math.min(maxDecor, lo + rand(2)) : 0;
+}
+
+/** Waktu animasi sebuah putaran (harus sama dengan urutan di SlotMachine.jsx). */
+function durationOfPlan(p) {
   const t = timings;
   let ms = t.dropOutMs + t.dropInMs + t.endPauseMs;
-  ms += res.steps.length * (t.highlightMs + t.popMs + t.refillMs);
-  if (res.payout > 0 && res.orbs.length) {
-    ms += res.orbs.length * t.orbEachMs + t.slamMs + t.orbSettleMs;
+  ms += p.steps.length * (t.highlightMs + t.popMs + t.refillMs);
+  const orbPhase = p.fs ? p.orbs.length > 0 : p.payout > 0 && p.orbs.length > 0;
+  if (orbPhase) {
+    ms += p.orbs.length * t.orbEachMs + t.orbSettleMs;
+    if (p.payout > 0) ms += t.slamMs;
   }
-  const tier = getWinTier(res.payout);
-  if (tier) ms += tier.durationMs;
+  if (!p.fs) {
+    const tier = getWinTier(p.payout);
+    if (tier) ms += tier.durationMs;
+  }
+  if (p.trigger) ms += t.scatterIntroMs;
+  if (p.fs) {
+    if (p.fs.retrigger) ms += t.fsRetriggerMs;
+    if (p.fs.last) {
+      ms += t.fsEndMs;
+      const tier = getWinTier(p.fs.grandTotal);
+      if (tier) ms += tier.durationMs;
+    }
+  }
   return ms;
 }
 
 function pack({ initial, res }) {
-  return {
+  const scatters = countKind(res.final, "scatter");
+  const plan = {
     id: planCounter++,
     kind: "full",
     initial,
@@ -315,29 +367,160 @@ function pack({ initial, res }) {
     tumbleTotal: res.tumbleTotal,
     multiplier: res.multiplier,
     payout: res.payout, // dalam kelipatan taruhan (mis. 1.5 = 1.5x taruhan)
-    durationMs: durationOf(res),
+    scatters,
+    trigger: scatters >= FREE_SPINS.triggerCount, // memicu free spin?
+    fs: null,
   };
+  plan.durationMs = durationOfPlan(plan);
+  return plan;
 }
 
 /**
  * Susun hasil satu putaran.
- * @param {{win:boolean, target?:number}} opts
- *   win    : keputusan bandar (true = menang)
- *   target : kelipatan taruhan yang diinginkan; engine memilih papan
- *            dengan pembayaran paling dekat dari tabel di slotConfig.js
+ * @param {{win:boolean, target?:number, scatters?:number}} opts
+ *   win      : keputusan bandar (true = menang)
+ *   target   : kelipatan taruhan yang diinginkan; engine memilih papan
+ *              dengan pembayaran paling dekat dari tabel di slotConfig.js
+ *   scatters : paksa jumlah scatter di papan (>= triggerCount memicu free spin).
+ *              Kosongkan untuk scatter pajangan acak.
  * @returns hasil dengan `payout` (kelipatan taruhan) yang nilainya PASTI
- *          sama dengan yang tergambar di papan.
+ *          sama dengan yang tergambar di papan. `trigger` = true bila memicu free spin.
  */
-export function buildSpinResult({ win, target = 1.5 }) {
+export function buildSpinResult({ win, target = 1.5, scatters } = {}) {
+  let out = null;
   if (win) {
     const near = nearCandidates(target);
-    for (let i = 0; i < 120; i++) {
-      const out = genWin(pickRecipe(near));
-      if (out) return pack(out);
-    }
-    console.warn("[slotEngine] gagal menyusun papan menang, memakai papan kalah.");
+    for (let i = 0; i < 120 && !out; i++) out = genWin(pickRecipe(near));
+    if (!out) console.warn("[slotEngine] gagal menyusun papan menang, memakai papan kalah.");
   }
-  return pack(genLoss());
+  if (!out) out = genLoss();
+  const n = scatters != null ? scatters : decorScatterCount(out.res.payout > 0);
+  convertCells(out.res, Array.from({ length: n }, () => ({ kind: "scatter" })));
+  return pack(out);
+}
+
+/** Pilih jumlah scatter saat free spin dipicu (mis. 4, 5, atau 6). */
+export function pickTriggerScatters(rng = Math.random) {
+  const entries = Object.entries(FREE_SPINS.triggerWeights).map(([k, w]) => [Number(k), w]);
+  const total = entries.reduce((a, [, w]) => a + w, 0);
+  let r = rng() * total;
+  for (const [k, w] of entries) if ((r -= w) < 0) return Math.max(k, FREE_SPINS.triggerCount);
+  return FREE_SPINS.triggerCount;
+}
+
+// ---------- FREE SPIN ----------
+// Nilai bola pengali di dalam free spin (bobot sendiri di FREE_SPINS.orbWeights).
+function pickFsOrb(rng) {
+  const entries = Object.entries(FREE_SPINS.orbWeights).map(([v, w]) => [Number(v), w]);
+  const total = entries.reduce((a, [, w]) => a + w, 0);
+  let r = rng() * total;
+  for (const [v, w] of entries) if ((r -= w) < 0) return v;
+  return entries[0][0];
+}
+
+// Satu free spin: bola pengali yang muncul DITAMBAHKAN ke pengali total (M),
+// walau putaran itu tidak menang. Kemenangan dikali max(1, M).
+function buildFsSpin({ won, target, orbValues, scatters, M0 }) {
+  let out = null;
+  if (won) {
+    const base = nearCandidates(target).filter((c) => c.cat !== "orb");
+    const pool = base.length ? base : CANDIDATES.filter((c) => c.cat !== "orb");
+    for (let i = 0; i < 120 && !out; i++) out = genWin(pickRecipe(pool));
+  }
+  if (!out) out = genLoss({ noOrbs: true });
+  const specs = [
+    ...orbValues.map((value) => ({ kind: "orb", value })),
+    ...Array.from({ length: scatters }, () => ({ kind: "scatter" })),
+  ];
+  convertCells(out.res, specs);
+
+  const orbs = [];
+  out.res.final.forEach((col) =>
+    col.forEach((c) => {
+      if (c.kind === "orb") orbs.push({ uid: c.uid, value: c.value });
+    }),
+  );
+  const orbSum = orbs.reduce((a, o) => a + o.value, 0);
+  const M1 = M0 + orbSum;
+  const tumbleTotal = out.res.tumbleTotal;
+  const applied = tumbleTotal > 0 ? Math.max(1, M1) : 1;
+  const res = {
+    ...out.res,
+    orbs,
+    multiplier: applied,
+    payout: tumbleTotal * applied,
+  };
+  const plan = pack({ initial: out.initial, res });
+  plan.trigger = false; // di dalam free spin, scatter hanya menambah putaran (retrigger)
+  return { plan, M1 };
+}
+
+/**
+ * Susun SATU ronde free spin lengkap (semua putarannya sudah ditentukan di sini).
+ * @param {{basePayout?:number, rng?:()=>number}} opts basePayout = kemenangan putaran pemicunya
+ * @returns {{spins:Array, total:number, grandTotal:number, finalMult:number}}
+ *   total = jumlah menang free spin (× taruhan), grandTotal = total + basePayout.
+ *   Tiap elemen `spins` bisa langsung dimainkan oleh SlotMachine.
+ */
+export function buildFreeSpinRound({ basePayout = 0, rng = Math.random } = {}) {
+  const F = FREE_SPINS;
+  const chance = (pct) => rng() * 100 < pct;
+  let left = F.spins;
+  let total = F.spins; // jumlah putaran yang sudah dijanjikan (termasuk retrigger)
+  let idx = 0;
+  let M = 0;
+  let win = 0;
+  const spins = [];
+
+  while (left > 0 && idx < F.maxSpins) {
+    left -= 1;
+    idx += 1;
+    const won = chance(F.winChancePercent);
+    const target = F.baseTargets[Math.floor(rng() * F.baseTargets.length)];
+    let k = 0;
+    if (chance(F.orbChancePercent)) k = chance(F.doubleOrbChancePercent) ? 2 : 1;
+    const orbValues = Array.from({ length: k }, () => pickFsOrb(rng));
+
+    let scatters = 0;
+    let retrigger = 0;
+    if (total < F.maxSpins && chance(F.retriggerChancePercent)) {
+      scatters = F.retriggerCount + (rng() < 0.2 ? 1 : 0);
+      retrigger = Math.min(F.retriggerSpins, F.maxSpins - total);
+    } else if (chance(25)) {
+      scatters = Math.max(0, Math.min(F.retriggerCount - 1, 1 + Math.floor(rng() * 2)));
+    }
+    if (retrigger) {
+      left += retrigger;
+      total += retrigger;
+    }
+
+    const { plan, M1 } = buildFsSpin({ won, target, orbValues, scatters, M0: M });
+    plan.fs = {
+      index: idx,
+      total,
+      multBefore: M,
+      multAfter: M1,
+      winBefore: win,
+      retrigger,
+      last: false,
+      grandTotal: 0,
+      baseWin: basePayout,
+    };
+    M = M1;
+    win += plan.payout;
+    spins.push(plan);
+    if (win >= F.maxWinX) break; // batas kemenangan ronde
+  }
+
+  const grandTotal = basePayout + win;
+  spins.forEach((p, i) => {
+    p.fs.last = i === spins.length - 1;
+    if (p.fs.last) p.fs.total = idx; // ronde berhenti lebih awal bila mencapai batas menang
+    p.fs.grandTotal = grandTotal;
+    p.fs.roundTotal = win;
+    p.durationMs = durationOfPlan(p);
+  });
+  return { spins, total: win, grandTotal, finalMult: M };
 }
 
 // Versi cepat untuk Auto Spin: hanya papan akhir yang ditampilkan.

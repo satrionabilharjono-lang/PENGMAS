@@ -5,9 +5,10 @@ import BandarTab from "./components/BandarTab";
 import BannerAds from "./components/BannerAds";
 import SpinControls from "./components/SpinControls";
 import { SYMBOLS } from "./slotConfig";
-import { JACKPOT, AUTOPLAY, SOUND } from "./slotExtras";
-import { buildSpinResult, createIdleResult, getWinTier } from "./slotEngine";
+import { AUTOPLAY, SOUND, FREE_SPINS } from "./slotExtras";
+import { createIdleResult, getWinTier } from "./slotEngine";
 import { requestSkip } from "./slotSkip";
+import { rollSpin, initialStats, recordSpin, recordTopup } from "./bandarLogic";
 import Sound from "./sound";
 
 const START_BALANCE = 1000000;
@@ -49,6 +50,10 @@ export default function App() {
   const [totalLoss, setTotalLoss] = useState(0);
   const [chartLoss, setChartLoss] = useState(0);
 
+  // Statistik untuk tab Bandar (GGR, loss chasing, dll.)
+  const [stats, setStats] = useState(() => initialStats(START_BALANCE));
+  const statsRef = useRef(stats);
+
   // Auto spin / skip / turbo
   const [auto, setAuto] = useState(IDLE_AUTO);
   const [canSkip, setCanSkip] = useState(false);
@@ -58,6 +63,7 @@ export default function App() {
   const [rtp, setRtp] = useState(30);
   const [baitMode, setBaitMode] = useState(true);
   const [forceLoss, setForceLoss] = useState(false);
+  const [fsChance, setFsChance] = useState(FREE_SPINS.chancePercent); // peluang free spin (%)
 
   // Ref: selalu berisi nilai terbaru (aman dipakai di dalam timer/loop)
   const balanceRef = useRef(balance);
@@ -68,6 +74,7 @@ export default function App() {
   const rtpRef = useRef(rtp);
   const baitRef = useRef(baitMode);
   const forceLossRef = useRef(forceLoss);
+  const fsChanceRef = useRef(fsChance);
   const turboRef = useRef(turbo);
 
   useEffect(() => { balanceRef.current = balance; }, [balance]);
@@ -78,6 +85,7 @@ export default function App() {
   useEffect(() => { rtpRef.current = rtp; }, [rtp]);
   useEffect(() => { baitRef.current = baitMode; }, [baitMode]);
   useEffect(() => { forceLossRef.current = forceLoss; }, [forceLoss]);
+  useEffect(() => { fsChanceRef.current = fsChance; }, [fsChance]);
   useEffect(() => { turboRef.current = turbo; }, [turbo]);
 
   // Kontrol putaran
@@ -124,6 +132,8 @@ export default function App() {
     const actualChange = updatedBalance - currentBalance;
     const updatedChartLoss = Math.max(0, currentChartLoss - actualChange);
 
+    statsRef.current = recordTopup(statsRef.current, actualChange);
+    setStats(statsRef.current);
     balanceRef.current = updatedBalance;
     chartLossRef.current = updatedChartLoss;
     setBalance(updatedBalance);
@@ -141,83 +151,99 @@ export default function App() {
     ]);
   };
 
-  // --- KEPUTUSAN BANDAR: menang/kalah + target kelipatan ---
-  const decideSpin = (nextSpinCount) => {
-    // 0. Jackpot (dimatikan oleh Force Loss)
-    if (
-      !forceLossRef.current &&
-      JACKPOT.chancePercent > 0 &&
-      Math.random() * 100 < JACKPOT.chancePercent
-    ) {
-      return { wantWin: true, target: JACKPOT.target };
-    }
+  // --- KEPUTUSAN BANDAR + papan + ronde free spin: semuanya di bandarLogic.js ---
+  // (dipakai juga oleh simulasi ribuan pemain, jadi aturannya selalu sama)
+  const roll = (nextSpinCount, stake) =>
+    rollSpin({
+      spinNo: nextSpinCount,
+      stake,
+      rtp: rtpRef.current,
+      bait: baitRef.current,
+      forceLoss: forceLossRef.current,
+      fsChance: fsChanceRef.current,
+    });
 
-    const bait = baitRef.current;
-    const isMiddleBait =
-      bait &&
-      nextSpinCount > 4 &&
-      (nextSpinCount % 6 === 0 || nextSpinCount % 9 === 0) &&
-      Math.random() < 0.5;
-
-    // 1. Umpan awal (spin 1-4) / umpan tengah
-    if ((bait && nextSpinCount <= 4) || isMiddleBait) {
-      return { wantWin: true, target: nextSpinCount <= 4 ? 2 : 1.3 };
-    }
-    // 2. Murni sesuai RTP bandar
-    if (!forceLossRef.current && Math.random() * 100 < rtpRef.current) {
-      return { wantWin: true, target: 1.5 };
-    }
-    return { wantWin: false, target: 1.5 };
-  };
-
-  const makeResult = (nextSpinCount, stake) => {
-    const { wantWin, target } = decideSpin(nextSpinCount);
-    return { ...buildSpinResult({ win: wantWin, target }), bet: stake };
-  };
-
-  // Satu putaran beranimasi (animasi + pencatatan). Resolve { ok, win, jackpot }.
-  // Dipakai oleh SPIN biasa dan AUTO.
-  const playOneSpin = async () => {
-    const myEpoch = epochRef.current;
-    const stake = betRef.current;
-    const startBalance = balanceRef.current;
-    if (startBalance < stake) return { ok: false, reason: "balance" };
-
-    const nextSpinCount = spinCountRef.current + 1;
-    const result = makeResult(nextSpinCount, stake);
-    const tier = result.payout > 0 ? getWinTier(result.payout) : null;
-    const isJackpot = !!(tier && tier.jackpot);
-    // Turbo melewati animasi, kecuali jackpot (selalu dimainkan penuh).
-    const quick = turboRef.current && !isJackpot;
-
+  // Mainkan SATU papan beranimasi (putaran utama atau satu free spin).
+  // Resolve "done" | "skip" | "cancel".
+  const animate = async (plan, quick) => {
     Sound.fadeOut("result", SOUND.resultFadeMs);
     Sound.fadeOut("fx", 150);
     Sound.play("spin", SOUND.spin, { loop: true });
-    setReels(quick ? { ...result, instant: true } : result);
+    setReels(quick ? { ...plan, instant: true } : plan);
     setIsSpinning(true);
 
-    const w = startWait(quick ? TURBO_MS : result.durationMs + 60);
+    const w = startWait(quick ? TURBO_MS : plan.durationMs + 60);
     if (!quick) {
       spinWaiterRef.current = w;
       setCanSkip(true);
     }
     const status = await w.promise;
-    if (epochRef.current !== myEpoch || status === "cancel") {
-      Sound.fadeOut("spin", 0);
-      return { ok: false, reason: "cancelled" };
-    }
     if (!quick) setCanSkip(false);
-
     // Putaran selesai (atau di-SKIP): suara spin dipaksa berhenti dengan fade-out halus
-    Sound.fadeOut("spin", SOUND.spinFadeMs);
+    Sound.fadeOut("spin", status === "cancel" ? 0 : SOUND.spinFadeMs);
+    return status;
+  };
 
+  // Satu putaran berbayar beranimasi, termasuk seluruh ronde free spin bila dipicu.
+  // Resolve { ok, win, jackpot }.  Dipakai oleh SPIN biasa dan AUTO.
+  const playOneSpin = async () => {
+    const myEpoch = epochRef.current;
+    const stake = betRef.current;
+    const startBalance = balanceRef.current;
+    if (startBalance < stake) return { ok: false, reason: "balance" };
+    const cancelled = (st) => st === "cancel" || epochRef.current !== myEpoch;
+
+    const nextSpinCount = spinCountRef.current + 1;
+    const { result, round } = roll(nextSpinCount, stake);
+
+    // Nilai Rp tiap bagian (dibulatkan per bagian supaya saldo selalu cocok)
+    const baseWin = Math.round(result.payout * stake);
+    const fsWins = round ? round.spins.map((p) => Math.round(p.payout * stake)) : [];
+    const fsTotalWin = fsWins.reduce((a, b) => a + b, 0);
+    const totalWin = baseWin + fsTotalWin;
+    const grandTier = totalWin > 0 ? getWinTier(totalWin / stake) : null;
+    const isJackpot = !!(grandTier && grandTier.jackpot);
+    let skipped = false;
+
+    // 1. Putaran utama. Turbo melewati animasi, kecuali jackpot dan putaran pemicu free spin.
+    const baseTier = baseWin > 0 ? getWinTier(result.payout) : null;
+    const quickBase = turboRef.current && !result.trigger && !(baseTier && baseTier.jackpot);
+    let status = await animate(result, quickBase);
+    if (cancelled(status)) return { ok: false, reason: "cancelled" };
+    if (status === "skip") skipped = true;
+
+    // Taruhan dipotong dan kemenangan putaran utama masuk saldo.
+    let running = startBalance - stake + baseWin;
+    balanceRef.current = running;
+    setBalance(running);
+    setLastWin(baseWin);
+
+    // 2. Ronde free spin (gratis): tiap free spin langsung menambah saldo.
+    if (round) {
+      let acc = baseWin;
+      for (let i = 0; i < round.spins.length; i++) {
+        const p = round.spins[i];
+        const lastTier = p.fs.last ? getWinTier(p.fs.grandTotal) : null;
+        const quickFs = turboRef.current && !(lastTier && lastTier.jackpot);
+        status = await animate(p, quickFs);
+        if (cancelled(status)) return { ok: false, reason: "cancelled" };
+        if (status === "skip") skipped = true;
+        running += fsWins[i];
+        acc += fsWins[i];
+        balanceRef.current = running;
+        setBalance(running);
+        setLastWin(acc);
+      }
+    }
+
+    // 3. Catat hasil seluruh putaran (utama + free spin) sebagai SATU putaran.
     const st = settle(
       { balance: startBalance, totalLoss: totalLossRef.current, chartLoss: chartLossRef.current },
-      result,
+      { payout: totalWin / stake },
       stake,
     );
     if (st.isWin) {
-      if (!tier || status === "skip") Sound.play("result", SOUND.win);
+      if (!grandTier || skipped) Sound.play("result", SOUND.win);
     } else {
       Sound.play("result", SOUND.loss);
     }
@@ -226,6 +252,17 @@ export default function App() {
     totalLossRef.current = st.totalLoss;
     chartLossRef.current = st.chartLoss;
     spinCountRef.current = nextSpinCount;
+    statsRef.current = recordSpin(statsRef.current, {
+      stake,
+      win: st.win,
+      balanceAfter: st.balance,
+      jackpot: isJackpot,
+      scatters: result.scatters,
+      fsTriggered: !!round,
+      fsPaid: fsTotalWin,
+      fsSpins: round ? round.spins.length : 0,
+    });
+    setStats(statsRef.current);
 
     setLastWin(st.win);
     setTotalLoss(st.totalLoss);
@@ -345,6 +382,7 @@ export default function App() {
     let lastWinAmount = 0;
     let done = 0;
     let wins = 0;
+    let fsRounds = 0;
     let note = "";
     const added = [];
 
@@ -354,13 +392,28 @@ export default function App() {
         break;
       }
       spin += 1;
-      const result = makeResult(spin, stake);
-      const next = settle(st, result, stake);
+      const { result, round } = roll(spin, stake);
+      const baseWinB = Math.round(result.payout * stake);
+      const fsWinB = round ? round.spins.reduce((a, p) => a + Math.round(p.payout * stake), 0) : 0;
+      const winB = baseWinB + fsWinB;
+      const next = settle(st, { payout: winB / stake }, stake);
       st = next;
       done += 1;
       if (next.isWin) wins += 1;
+      if (round) fsRounds += 1;
       last = result;
-      lastWinAmount = next.win;
+      lastWinAmount = winB;
+      const tierB = winB > 0 ? getWinTier(winB / stake) : null;
+      statsRef.current = recordSpin(statsRef.current, {
+        stake,
+        win: winB,
+        balanceAfter: next.balance,
+        jackpot: !!(tierB && tierB.jackpot),
+        scatters: result.scatters,
+        fsTriggered: !!round,
+        fsPaid: fsWinB,
+        fsSpins: round ? round.spins.length : 0,
+      });
       added.push({
         spin,
         balance: Math.round(next.balance),
@@ -368,8 +421,7 @@ export default function App() {
         chartLoss: next.chartLoss,
         eventType: next.isWin ? "spin-win" : "spin-loss",
       });
-      const tier = next.isWin ? getWinTier(result.payout) : null;
-      if (tier && tier.jackpot && AUTOPLAY.stopOnJackpot) {
+      if (tierB && tierB.jackpot && AUTOPLAY.stopOnJackpot) {
         note = "berhenti: JACKPOT!";
         break;
       }
@@ -381,6 +433,7 @@ export default function App() {
     chartLossRef.current = st.chartLoss;
     spinCountRef.current = spin;
 
+    setStats(statsRef.current);
     setReels({ ...last, bet: stake }); // papan menampilkan putaran terakhir
     setBalance(finalBalance);
     setTotalLoss(st.totalLoss);
@@ -394,7 +447,9 @@ export default function App() {
       total,
       mode: "batch",
       note:
-        `Simulasi ${done} putaran · menang ${wins}× · saldo ` +
+        `Simulasi ${done} putaran · menang ${wins}×` +
+        (fsRounds ? ` · free spin ${fsRounds}×` : "") +
+        ` · saldo ` +
         `${Math.round(initialBalance).toLocaleString("id-ID")} → ${finalBalance.toLocaleString("id-ID")}` +
         (note ? ` (${note})` : ""),
     });
@@ -430,6 +485,8 @@ export default function App() {
     totalLossRef.current = 0;
     chartLossRef.current = 0;
     spinCountRef.current = 0;
+    statsRef.current = initialStats(START_BALANCE);
+    setStats(statsRef.current);
 
     setBalance(START_BALANCE);
     setBet(START_BET);
@@ -503,6 +560,13 @@ export default function App() {
               setBaitMode={setBaitMode}
               forceLoss={forceLoss}
               setForceLoss={setForceLoss}
+              fsChance={fsChance}
+              setFsChance={setFsChance}
+              stats={stats}
+              spinCount={spinCount}
+              bet={bet}
+              balance={balance}
+              startBalance={START_BALANCE}
             />
           )}
         </main>

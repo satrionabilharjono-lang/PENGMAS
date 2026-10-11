@@ -118,5 +118,25 @@ function celebrate(tier) {
   return null;
 }
 
-const Sound = { play, fadeOut, stopAll, multiplier, celebrate };
+/** Suara scatter / free spin dimulai: arpeggio naik + kilau. */
+function scatter() {
+  if (SOUND.scatter) return play("fx", SOUND.scatter);
+  [392, 523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) =>
+    tone({ freq: f, dur: 0.7, type: "triangle", gain: 0.06, delay: i * 0.13 }),
+  );
+  [2093, 2637, 3136].forEach((f, i) =>
+    tone({ freq: f, to: f * 0.7, dur: 0.9, type: "sine", gain: 0.03, delay: 0.5 + i * 0.12 }),
+  );
+  tone({ freq: 90, to: 45, dur: 1.2, type: "sine", gain: 0.14, delay: 0.7 });
+  return null;
+}
+
+/** Suara kecil saat free spin bertambah (retrigger). */
+function retrigger() {
+  [659.25, 880, 1174.66].forEach((f, i) =>
+    tone({ freq: f, dur: 0.4, type: "triangle", gain: 0.06, delay: i * 0.09 }),
+  );
+}
+
+const Sound = { play, fadeOut, stopAll, multiplier, celebrate, scatter, retrigger };
 export default Sound;
