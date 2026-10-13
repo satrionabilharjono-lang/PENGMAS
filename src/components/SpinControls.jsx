@@ -24,7 +24,8 @@ export default function SpinControls({
   onStopAuto,
 }) {
   const [count, setCount] = useState(25);
-  const clamp = (v) => Math.min(MAX_COUNT, Math.max(1, Math.floor(Number(v) || 1)));
+  const clamp = (v) =>
+    Math.min(MAX_COUNT, Math.max(1, Math.floor(Number(v) || 1)));
   const busy = isSpinning || auto.active;
   const broke = balance < bet;
   const affordable = bet > 0 ? Math.floor(balance / bet) : 0;
@@ -47,7 +48,9 @@ export default function SpinControls({
                 ? `${auto.mode === "batch" ? "SIMULASI" : "AUTO SPIN"} · sisa ${auto.left}/${auto.total}`
                 : "Selesai"}
             </p>
-            {auto.note && <p className="truncate text-xs text-slate-400">{auto.note}</p>}
+            {auto.note && (
+              <p className="truncate text-xs text-slate-400">{auto.note}</p>
+            )}
           </div>
           {auto.active && (
             <button
@@ -61,43 +64,14 @@ export default function SpinControls({
         </div>
       )}
 
-      {/* baris utama: spin + skip + turbo */}
-      <div className="flex flex-wrap items-stretch gap-2">
-        <button
-          data-testid="spin"
-          onClick={onSpin}
-          disabled={busy || broke}
-          className={`${btn} min-w-[8rem] flex-1 bg-gradient-to-b from-amber-300 to-amber-500 py-4 text-lg text-slate-900 hover:brightness-110`}
-        >
-          SPIN · {rupiah(bet)}
-        </button>
-        <button
-          data-testid="skip"
-          onClick={onSkip}
-          disabled={!canSkip}
-          className={`${btn} bg-slate-700 text-white hover:bg-slate-600`}
-          title="Lewati animasi putaran ini dan langsung lihat hasilnya"
-        >
-          SKIP ⏭
-        </button>
-        <label
-          className={`${btn} flex cursor-pointer select-none items-center gap-2 border border-slate-600 bg-slate-800 text-xs text-slate-200`}
-          title="Turbo: animasi tiap putaran dilewati otomatis (jackpot tetap dimainkan)"
-        >
-          <input
-            data-testid="turbo"
-            type="checkbox"
-            checked={turbo}
-            onChange={(e) => setTurbo(e.target.checked)}
-          />
-          TURBO
-        </label>
-      </div>
+      
 
       {/* baris multi-putaran */}
       <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs uppercase tracking-widest text-slate-400">Jumlah putaran</span>
+          <span className="text-xs uppercase tracking-widest text-slate-400">
+            Jumlah putaran
+          </span>
           <div className="flex items-center overflow-hidden rounded-lg border border-slate-600">
             <button
               data-testid="count-minus"
@@ -114,7 +88,9 @@ export default function SpinControls({
               max={MAX_COUNT}
               value={count}
               disabled={busy}
-              onChange={(e) => setCount(e.target.value === "" ? "" : clamp(e.target.value))}
+              onChange={(e) =>
+                setCount(e.target.value === "" ? "" : clamp(e.target.value))
+              }
               onBlur={() => setCount((c) => clamp(c))}
               className="w-16 bg-transparent py-1.5 text-center text-sm font-bold tabular-nums outline-none"
             />
@@ -141,10 +117,37 @@ export default function SpinControls({
               {n}×
             </button>
           ))}
+
+          {/* skip turbo */}
+          <div className="flex flex-wrap items-stretch gap-2">
+          
+            <button
+              data-testid="skip"
+              onClick={onSkip}
+              disabled={!canSkip}
+              className={`${btn} bg-slate-700 text-white hover:bg-slate-600`}
+              title="Lewati animasi putaran ini dan langsung lihat hasilnya"
+            >
+              SKIP ⏭
+            </button>
+            <label
+              className={`${btn} flex cursor-pointer select-none items-center gap-2 border border-slate-600 bg-slate-800 text-xs text-slate-200`}
+              title="Turbo: animasi tiap putaran dilewati otomatis (jackpot tetap dimainkan)"
+            >
+              <input
+                data-testid="turbo"
+                type="checkbox"
+                checked={turbo}
+                onChange={(e) => setTurbo(e.target.checked)}
+              />
+              TURBO
+            </label>
+          </div>
         </div>
 
         <p className="mt-2 text-xs text-slate-400">
-          Tiap putaran memakai taruhan {rupiah(bet)}. Maksimal terpakai {rupiah(worstCase)}
+          Tiap putaran memakai taruhan {rupiah(bet)}. Maksimal terpakai{" "}
+          {rupiah(worstCase)}
           {broke
             ? " — saldo tidak cukup."
             : affordable < count

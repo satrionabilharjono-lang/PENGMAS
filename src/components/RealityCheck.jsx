@@ -16,7 +16,7 @@ export default function RealityCheck({ totalLoss }) {
 
         <div className="space-y-3">
           <div className="bg-slate-900 p-3 rounded-xl border border-slate-700/50 flex justify-between items-center">
-            <span className="text-xs text-slate-300">Porsi Nasi Goreng (Rp 15rb)</span>
+            <span className="text-xs text-slate-300"> Nasi Goreng (Rp 15rb)</span>
             <span className="text-sm font-bold text-amber-400">
               {Math.floor(lostAmount / 15000)} Porsi
             </span>
@@ -28,9 +28,9 @@ export default function RealityCheck({ totalLoss }) {
             </span>
           </div>
           <div className="bg-slate-900 p-3 rounded-xl border border-slate-700/50 flex justify-between items-center">
-            <span className="text-xs text-slate-300">Bayar Kontrakan/Kost (Rp 500rb)</span>
+            <span className="text-xs text-slate-300">top up robux</span>
             <span className="text-sm font-bold text-amber-400">
-              {(lostAmount / 500000).toFixed(1)} Bulan
+              {Math.round(lostAmount / 225)} ROBUX
             </span>
           </div>
         </div>

@@ -57,10 +57,10 @@ export const SOUND = {
   spin: "spin.mp3",
   win: "win.mp3",
   loss: "loss.mp3",
-  multiplier: null,
-  bigWin: null,
-  jackpot: null,
-  scatter: null,   // suara scatter / free spin mulai
+  multiplier: "hehe.mp3",
+  bigWin: "savage.mp3",
+  jackpot: "jackpot.mp3",
+  scatter: "scatter.mp3",   // suara scatter / free spin mulai
   spinFadeMs: 600,
   resultFadeMs: 300,
 };
