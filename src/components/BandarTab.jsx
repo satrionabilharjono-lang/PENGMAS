@@ -9,6 +9,7 @@ import { Card, Stat, Insight, rupiah, pct } from "./bandar/ui";
 import CrowdSimulation from "./bandar/CrowdSimulation";
 import PromoPanel from "./bandar/PromoPanel";
 import ComplianceCard from "./bandar/ComplianceCard";
+import WithdrawQueue from "./bandar/WithdrawQueue";
 
 const BIG = WIN_TIERS[1] ? WIN_TIERS[1].min : 15; // ambang "menang besar" untuk peringatan
 
@@ -21,6 +22,8 @@ export default function BandarTab({
   setForceLoss,
   fsChance = FREE_SPINS.chancePercent,
   setFsChance = () => {},
+  withdrawals = [],
+  onWithdrawDecision = () => {},
   // data untuk dashboard (dikirim App.jsx)
   stats,
   spinCount = 0,
@@ -55,6 +58,14 @@ export default function BandarTab({
     alerts.push(["amber", `Terdeteksi loss chasing ${s.chaseCount}×: pemain menaikkan taruhan setelah kalah.`]);
   if (s && s.spins > 0 && balance < 200000)
     alerts.push(["amber", "Saldo pemain menipis. Waktu yang tepat untuk menawarkan bonus top-up."]);
+  const pendingWd = withdrawals.filter((w) => w.status === "pending");
+  if (pendingWd.length > 0)
+    alerts.unshift([
+      "amber",
+      `Ada ${pendingWd.length} permintaan penarikan menunggu keputusanmu (${rupiah(
+        pendingWd.reduce((a, w) => a + w.amount, 0),
+      )}). Lihat bagian Antrean Penarikan.`,
+    ]);
   if (s && s.fsTriggers > 0)
     alerts.push(["green", `Free spin dipicu ${s.fsTriggers}× (${rupiah(s.fsPaid)} dibayar). Fitur ini menahan pemain bermain lebih lama.`]);
   if (s && s.nearScatter >= 2)
@@ -98,6 +109,9 @@ export default function BandarTab({
           ))}
         </div>
       )}
+
+      {/* ===== 0. Antrean penarikan (keputusan manual) ===== */}
+      <WithdrawQueue withdrawals={withdrawals} onDecide={onWithdrawDecision} stats={stats} />
 
       {/* ===== 1. Ringkasan keuangan ===== */}
       <Card icon="💰" title="Ringkasan Keuangan" subtitle="Dihitung dari semua putaran yang sudah kamu mainkan.">

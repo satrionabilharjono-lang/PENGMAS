@@ -129,3 +129,24 @@ export const FREE_SPINS = {
   doubleOrbChancePercent: 25,
   maxWinX: 300,
 };
+
+// ---------------------------------------------------------------------
+// 8. DOMPET & PENARIKAN
+//    min          : penarikan minimal (Rp)
+//    quick        : tombol jumlah cepat di form tarik saldo (Rp)
+//    steps        : pilihan nilai tombol + / - untuk saldo top up dan dompet (Rp)
+//    rejectReasons: alasan penolakan yang bisa dipilih bandar. Ini pola yang
+//                   sering dilaporkan korban judol; ubah/tambah sesuka hati.
+// ---------------------------------------------------------------------
+export const WITHDRAW = {
+  min: 50000,
+  quick: [100000, 500000, 1000000],
+  steps: [10000, 50000, 100000, 500000, 1000000],
+  rejectReasons: [
+    "Syarat turnover belum terpenuhi",
+    "Verifikasi data gagal (foto KTP / selfie tidak sesuai)",
+    "Terindikasi kecurangan / memanfaatkan bug",
+    "Wajib membayar biaya admin / pajak lebih dulu",
+    "Akun sedang dalam pemeriksaan",
+  ],
+};

@@ -5,7 +5,7 @@ import BandarTab from "./components/BandarTab";
 import BannerAds from "./components/BannerAds";
 import SpinControls from "./components/SpinControls";
 import { SYMBOLS } from "./slotConfig";
-import { AUTOPLAY, SOUND, FREE_SPINS } from "./slotExtras";
+import { AUTOPLAY, SOUND, FREE_SPINS, WITHDRAW } from "./slotExtras";
 import { createIdleResult, getWinTier } from "./slotEngine";
 import { requestSkip } from "./slotSkip";
 import { rollSpin, initialStats, recordSpin, recordTopup } from "./bandarLogic";
@@ -53,6 +53,14 @@ export default function App() {
   // Statistik untuk tab Bandar (GGR, loss chasing, dll.)
   const [stats, setStats] = useState(() => initialStats(START_BALANCE));
   const statsRef = useRef(stats);
+
+  // Dompet (uang nyata pemain) + antrean penarikan yang diputuskan manual oleh bandar.
+  // Saldo game (balance) = uang yang di-top up dan dimainkan.
+  const [wallet, setWallet] = useState(0);
+  const [withdrawals, setWithdrawals] = useState([]);
+  const walletRef = useRef(0);
+  const withdrawalsRef = useRef([]);
+  const wdSeq = useRef(1);
 
   // Auto spin / skip / turbo
   const [auto, setAuto] = useState(IDLE_AUTO);
@@ -123,6 +131,89 @@ export default function App() {
     },
     [],
   );
+
+  // Uang yang sedang/ sudah keluar lewat penarikan (menunggu atau disetujui).
+  // Dipakai statistik supaya penarikan tidak dianggap "modal terkikis".
+  const outAmount = () =>
+    withdrawalsRef.current
+      .filter((w) => w.status === "pending" || w.status === "approved")
+      .reduce((a, w) => a + w.amount, 0);
+
+  const pushHistory = (eventType) =>
+    setHistory((prev) => [
+      ...prev,
+      {
+        spin: spinCountRef.current,
+        balance: balanceRef.current,
+        totalLoss: totalLossRef.current,
+        chartLoss: chartLossRef.current,
+        eventType,
+      },
+    ]);
+
+  const commitWithdrawals = (list) => {
+    withdrawalsRef.current = list;
+    setWithdrawals(list);
+  };
+
+  // ± saldo dompet (uang nyata). Tidak boleh di bawah 0.
+  const handleWalletChange = (amount) => {
+    const next = Math.max(0, walletRef.current + amount);
+    walletRef.current = next;
+    setWallet(next);
+  };
+
+  // Pemain mengajukan penarikan: dana dipindah dari saldo game ke antrean (ditahan).
+  // Mengembalikan { ok, error }.
+  const handleWithdrawRequest = (amount) => {
+    const n = Math.floor(Number(amount));
+    if (!Number.isFinite(n) || n <= 0) return { ok: false, error: "Masukkan jumlah penarikan." };
+    if (n < WITHDRAW.min)
+      return { ok: false, error: `Penarikan minimal Rp ${WITHDRAW.min.toLocaleString("id-ID")}.` };
+    if (n > balanceRef.current) return { ok: false, error: "Jumlah melebihi saldo top up." };
+
+    balanceRef.current -= n;
+    setBalance(balanceRef.current);
+    commitWithdrawals([
+      {
+        id: wdSeq.current++,
+        amount: n,
+        status: "pending",
+        spinNo: spinCountRef.current,
+        at: Date.now(),
+        reason: "",
+        seized: false,
+        decidedAt: null,
+      },
+      ...withdrawalsRef.current,
+    ]);
+    pushHistory("manual-subtract");
+    return { ok: true };
+  };
+
+  // Keputusan bandar (manual): setujui atau tolak.
+  // decision = { action: "approve" } | { action: "reject", reason, seize }
+  const handleWithdrawDecision = (id, decision) => {
+    const item = withdrawalsRef.current.find((w) => w.id === id);
+    if (!item || item.status !== "pending") return;
+    let patch;
+    if (decision.action === "approve") {
+      walletRef.current += item.amount;
+      setWallet(walletRef.current);
+      patch = { status: "approved" };
+    } else {
+      const seize = !!decision.seize;
+      if (!seize) {
+        balanceRef.current += item.amount; // dana kembali ke saldo top up
+        setBalance(balanceRef.current);
+        pushHistory("manual-add");
+      }
+      patch = { status: "rejected", reason: decision.reason || "Ditolak bandar", seized: seize };
+    }
+    commitWithdrawals(
+      withdrawalsRef.current.map((w) => (w.id === id ? { ...w, ...patch, decidedAt: Date.now() } : w)),
+    );
+  };
 
   const handleManualBalanceChange = (amount) => {
     const currentBalance = balanceRef.current;
@@ -213,7 +304,7 @@ export default function App() {
     if (status === "skip") skipped = true;
 
     // Taruhan dipotong dan kemenangan putaran utama masuk saldo.
-    let running = startBalance - stake + baseWin;
+    let running = balanceRef.current - stake + baseWin; // baca saldo terbaru (bisa berubah saat animasi)
     balanceRef.current = running;
     setBalance(running);
     setLastWin(baseWin);
@@ -228,7 +319,7 @@ export default function App() {
         status = await animate(p, quickFs);
         if (cancelled(status)) return { ok: false, reason: "cancelled" };
         if (status === "skip") skipped = true;
-        running += fsWins[i];
+        running = balanceRef.current + fsWins[i];
         acc += fsWins[i];
         balanceRef.current = running;
         setBalance(running);
@@ -248,14 +339,14 @@ export default function App() {
       Sound.play("result", SOUND.loss);
     }
 
-    balanceRef.current = st.balance;
+    const finalBalance = balanceRef.current; // sudah diperbarui bertahap di atas
     totalLossRef.current = st.totalLoss;
     chartLossRef.current = st.chartLoss;
     spinCountRef.current = nextSpinCount;
     statsRef.current = recordSpin(statsRef.current, {
       stake,
       win: st.win,
-      balanceAfter: st.balance,
+      balanceAfter: finalBalance + outAmount(),
       jackpot: isJackpot,
       scatters: result.scatters,
       fsTriggered: !!round,
@@ -266,14 +357,14 @@ export default function App() {
 
     setLastWin(st.win);
     setTotalLoss(st.totalLoss);
-    setBalance(st.balance);
+    setBalance(finalBalance);
     setSpinCount(nextSpinCount);
     setChartLoss(st.chartLoss);
     setHistory((prev) => [
       ...prev,
       {
         spin: nextSpinCount,
-        balance: st.balance,
+        balance: finalBalance,
         totalLoss: st.totalLoss,
         chartLoss: st.chartLoss,
         eventType: st.isWin ? "spin-win" : "spin-loss",
@@ -407,7 +498,7 @@ export default function App() {
       statsRef.current = recordSpin(statsRef.current, {
         stake,
         win: winB,
-        balanceAfter: next.balance,
+        balanceAfter: next.balance + outAmount(),
         jackpot: !!(tierB && tierB.jackpot),
         scatters: result.scatters,
         fsTriggered: !!round,
@@ -485,6 +576,9 @@ export default function App() {
     totalLossRef.current = 0;
     chartLossRef.current = 0;
     spinCountRef.current = 0;
+    walletRef.current = 0;
+    setWallet(0);
+    commitWithdrawals([]);
     statsRef.current = initialStats(START_BALANCE);
     setStats(statsRef.current);
 
@@ -544,6 +638,10 @@ export default function App() {
               isSpinning={isSpinning}
               totalLoss={totalLoss}
               handleManualBalanceChange={handleManualBalanceChange}
+              wallet={wallet}
+              handleWalletChange={handleWalletChange}
+              withdrawals={withdrawals}
+              handleWithdrawRequest={handleWithdrawRequest}
               symbols={SYMBOLS.map((s) => s.img)}
               handleSpin={handleSpin}
               handleAutoSpin={handleAutoSpin}
@@ -562,6 +660,8 @@ export default function App() {
               setForceLoss={setForceLoss}
               fsChance={fsChance}
               setFsChance={setFsChance}
+              withdrawals={withdrawals}
+              onWithdrawDecision={handleWithdrawDecision}
               stats={stats}
               spinCount={spinCount}
               bet={bet}
